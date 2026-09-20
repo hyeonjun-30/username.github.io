@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mobile IRL Subtitles</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 8px;
+      background: transparent;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    /* 모바일 화면 우측 하단에 최적화된 크기 */
+    #caption-container {
+      display: inline-flex;
+      flex-direction: column;
+      gap: 3px;
+      max-width: 90vw;
+      background: rgba(10, 10, 15, 0.75);
+      padding: 8px 12px;
+      border-radius: 10px;
+      border-left: 3px solid #53FC18; /* Kick 시그니처 형광 그린 */
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      transition: opacity 0.4s ease;
+    }
+
+    /* 한국어 원문 (흰색 + 굵은 테두리) */
+    .kr-text {
+      color: #FFFFFF;
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 1.3;
+      text-shadow: 
+        -1.5px -1.5px 0 #000,
+         1.5px -1.5px 0 #000,
+        -1.5px  1.5px 0 #000,
+         1.5px  1.5px 0 #000;
+      word-break: break-word;
+    }
+
+    /* 실시간 번역문 (눈에 띄는 옐로우 톤) */
+    .tr-text {
+      color: #FFE600;
+      font-size: 14px;
+      font-weight: 600;
+      line-height: 1.25;
+      text-shadow: 
+        -1px -1px 0 #000,
+         1px -1px 0 #000,
+        -1px  1px 0 #000,
+         1px  1px 0 #000;
+      word-break: break-word;
+    }
+
+    .badge {
+      font-size: 10px;
+      background: rgba(255, 255, 255, 0.2);
+      padding: 1px 4px;
+      border-radius: 3px;
+      margin-right: 5px;
+      color: #53FC18;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="caption-container">
+    <div id="kr-val" class="kr-text">마이크 대기 중...</div>
+    <div id="tr-val" class="tr-text"><span class="badge">EN</span>Waiting...</div>
+  </div>
+
+  <script>
+    const krEl = document.getElementById('kr-val');
+    const trEl = document.getElementById('tr-val');
+    const container = document.getElementById('caption-container');
+
+    const TARGET_LANG = 'en'; // 영어는 'en', 태국어는 'th'
+    let clearTimer = null;
+    let translateTimer = null;
+
+    // 모바일 하드웨어 소음 억제(Noise Suppression) 강제 활성화
+    async function initHardwareNoiseFilter() {
+      try {
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+          await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true, // 에코 제거
+              noiseSuppression: true, // 주변 소음 및 배경 음악 감쇄
+              autoGainControl: true   // 목소리 음량 균일화
+            }
+          });
+        }
+      } catch (e) {
+        console.warn('하드웨어 오디오 필터 초기화 스킵:', e);
+      }
+    }
+    initHardwareNoiseFilter();
+
+    // 실시간 무료 번역 API 호출
+    async function translateText(text) {
+      if (!text || text.trim() === '') return;
+      try {
+        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=ko&tl=${TARGET_LANG}&dt=t&q=${encodeURIComponent(text)}`;
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data && data[0]) {
+          const result = data[0].map(item => item[0]).join('');
+          trEl.innerHTML = `<span class="badge">${TARGET_LANG.toUpperCase()}</span>${result}`;
+        }
+      } catch (err) {
+        console.error('번역 오류:', err);
+      }
+    }
+
+    // Web Speech API 실행
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (SpeechRecognition) {
+      const recognition = new SpeechRecognition();
+      recognition.lang = 'ko-KR';
+      recognition.continuous = true;
+      recognition.interimResults = true;
+
+      recognition.onresult = (e) => {
+        container.style.opacity = '1';
+        let interim = '';
+        let final = '';
+
+        for (let i = e.resultIndex; i < e.results.length; ++i) {
+          if (e.results[i].isFinal) {
+            final += e.results[i][0].transcript;
+          } else {
+            interim += e.results[i][0].transcript;
+          }
+        }
+
+        const speech = final || interim;
+        if (speech.trim().length > 0) {
+          krEl.innerText = speech;
+
+          // 타이핑 도중 번역 디바운스 (300ms)
+          clearTimeout(translateTimer);
+          translateTimer = setTimeout(() => translateText(speech), 300);
+
+          // 4초 침묵 시 투명화
+          clearTimeout(clearTimer);
+          clearTimer = setTimeout(() => {
+            container.style.opacity = '0';
+          }, 4000);
+        }
+      };
+
+      recognition.onend = () => {
+        try { recognition.start(); } catch(err) { setTimeout(() => recognition.start(), 400); }
+      };
+
+      recognition.start();
+    }
+  </script>
+</body>
+</html>
