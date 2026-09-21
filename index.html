@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <title>Free Live Subtitles</title>
+  <title>Live Korean to English Subtitles</title>
   <style>
     * {
       box-sizing: border-box;
@@ -22,66 +22,112 @@
       text-align: center;
       pointer-events: none;
     }
-    #subtitle {
-      display: inline-block;
-      color: #ffffff;
+    /* 한국어 원문 스타일 */
+    #ko-text {
+      font-size: 20px;
+      font-weight: 600;
+      color: #e0e0e0;
+      margin-bottom: 6px;
+      text-shadow:
+        -1.5px -1.5px 0 #000,
+         1.5px -1.5px 0 #000,
+        -1.5px  1.5px 0 #000,
+         1.5px  1.5px 0 #000,
+         0 2px 6px rgba(0, 0, 0, 0.9);
+      word-break: keep-all;
+    }
+    /* 영어 번역문 스타일 (크고 굵게 강조) */
+    #en-text {
       font-size: 28px;
       font-weight: 800;
-      line-height: 1.4;
-      word-break: keep-all;
-      /* 야외 영상에서도 선명하게 보이도록 강한 검은색 외곽선 및 그림자 */
+      color: #ffd700; /* 야외에서 잘 보이는 노란색 톤 */
+      line-height: 1.3;
       text-shadow:
         -2px -2px 0 #000,
          2px -2px 0 #000,
         -2px  2px 0 #000,
          2px  2px 0 #000,
-         0 3px 8px rgba(0, 0, 0, 0.9);
-      transition: opacity 0.3s ease;
+         0 3px 10px rgba(0, 0, 0, 0.95);
+      word-break: keep-all;
     }
   </style>
 </head>
 <body>
   <div id="container">
-    <span id="subtitle"></span>
+    <div id="ko-text"></div>
+    <div id="en-text"></div>
   </div>
 
   <script>
-    const subElement = document.getElementById('subtitle');
+    const koElement = document.getElementById('ko-text');
+    const enElement = document.getElementById('en-text');
     let hideTimer = null;
+    let lastTranslatedText = '';
 
-    // 브라우저 내장 Web Speech API 호출
+    // 무료 구글 번역 클라이언트 호출 함수 (서버 불필요)
+    async function translateKoToEn(text) {
+      if (!text || text.trim() === '' || text === lastTranslatedText) return;
+      lastTranslatedText = text;
+
+      try {
+        const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=ko&tl=en&dt=t&q=${encodeURIComponent(text)}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data && data[0]) {
+          const translated = data[0].map(item => item[0]).join('');
+          enElement.innerText = translated;
+        }
+      } catch (err) {
+        console.error('Translation error:', err);
+      }
+    }
+
+    // Web Speech API (한국어 음성인식)
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      subElement.innerText = "이 브라우저는 음성 인식을 지원하지 않습니다.";
+      enElement.innerText = "Speech Recognition not supported in this browser.";
     } else {
       const recognition = new SpeechRecognition();
-      recognition.lang = 'ko-KR';       // 한국어 인식
-      recognition.continuous = true;     // 연속 인식
-      recognition.interimResults = true; // 말하는 도중 실시간 갱신
+      recognition.lang = 'ko-KR';
+      recognition.continuous = true;
+      recognition.interimResults = true; // 말하는 중간에도 즉각 반영
 
       recognition.onresult = (event) => {
-        let transcript = '';
+        let interimText = '';
+        let finalText = '';
+
         for (let i = event.resultIndex; i < event.results.length; i++) {
-          transcript += event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalText += event.results[i][0].transcript;
+          } else {
+            interimText += event.results[i][0].transcript;
+          }
         }
 
-        subElement.innerText = transcript;
+        const currentSpeech = (finalText || interimText).trim();
+        if (currentSpeech) {
+          koElement.innerText = currentSpeech;
 
-        // 말이 멈추면 3.5초 뒤 자막 지우기
-        clearTimeout(hideTimer);
-        hideTimer = setTimeout(() => {
-          subElement.innerText = '';
-        }, 3500);
+          // 단어/문장이 갱신될 때 실시간 영작 번역 호출
+          translateKoToEn(currentSpeech);
+
+          // 발화 종료 후 4초 뒤 자막 페이드아웃
+          clearTimeout(hideTimer);
+          hideTimer = setTimeout(() => {
+            koElement.innerText = '';
+            enElement.innerText = '';
+            lastTranslatedText = '';
+          }, 4000);
+        }
       };
 
-      // 끊기면 자동으로 재연결하여 상시 유지
+      // 인식 끊김 방지 (상시 수신 유지)
       recognition.onend = () => {
         try {
           recognition.start();
-        } catch (e) {
-          // 이미 실행 중일 경우 예외 무시
-        }
+        } catch (e) {}
       };
 
       recognition.onerror = (e) => {
